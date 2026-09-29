@@ -23,13 +23,13 @@ def _event(*, roles: list[str], scopes: str) -> dict[str, Any]:
 
 
 def test_claims_are_read_from_http_api_jwt_context() -> None:
-    event = _event(roles=["Auditor"], scopes="catalog.read orders.read")
+    event = _event(roles=["Cliente"], scopes="catalog.read orders.read")
 
     assert get_claims(event)["sub"] == "subject-1"
     principal = get_principal(event)
     assert principal is not None
     assert principal.customer_id == "customer-1"
-    assert principal.roles == frozenset({"Auditor"})
+    assert principal.roles == frozenset({"Cliente"})
     assert principal.scopes == frozenset({"catalog.read", "orders.read"})
 
 
@@ -59,19 +59,50 @@ def test_missing_scope_returns_403(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result["statusCode"] == 403
 
 
-def test_auditor_is_outside_current_business_routes() -> None:
-    event = _event(roles=["Auditor"], scopes="catalog.read orders.read")
+def test_unassigned_role_is_rejected() -> None:
+    """Un token con un rol ajeno a la matriz (Admin/Operador/Cliente) no accede a ninguna ruta."""
+    event = _event(roles=["Externo"], scopes="catalog.read orders.read")
 
     assert catalog_handlers.listar_catalogo(event, None)["statusCode"] == 403
     assert order_handlers.listar_pedidos(event, None)["statusCode"] == 403
 
 
-def test_operator_catalog_write_is_currently_allowed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_operator_can_read_catalog_but_cannot_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog_handlers._service, "list_products", lambda: [])
     monkeypatch.setattr(catalog_handlers._service, "create_product", lambda payload: {"id": payload["nombre"]})
-    event = _event(roles=["Operador"], scopes="catalog.write")
+
+    event = _event(roles=["Operador"], scopes="catalog.read catalog.write")
     event["body"] = '{"nombre":"Producto","precio":1,"stock":1}'
+    event["pathParameters"] = {"id": "prod-1"}
+
+    assert catalog_handlers.listar_catalogo(event, None)["statusCode"] == 200
+    assert catalog_handlers.crear_producto(event, None)["statusCode"] == 403
+    assert catalog_handlers.actualizar_producto(event, None)["statusCode"] == 403
+    assert catalog_handlers.eliminar_producto(event, None)["statusCode"] == 403
+
+
+def test_only_admin_can_write_catalog(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(catalog_handlers._service, "create_product", lambda payload: {"id": payload["nombre"]})
+    monkeypatch.setattr(catalog_handlers._service, "update_product", lambda product_id, payload: {"id": product_id, **payload})
+    monkeypatch.setattr(catalog_handlers._service, "delete_product", lambda product_id: None)
+
+    event = _event(roles=["Admin"], scopes="catalog.write")
+    event["body"] = '{"nombre":"Producto","precio":1,"stock":1}'
+    event["pathParameters"] = {"id": "prod-1"}
 
     assert catalog_handlers.crear_producto(event, None)["statusCode"] == 201
+    assert catalog_handlers.actualizar_producto(event, None)["statusCode"] == 200
+    assert catalog_handlers.eliminar_producto(event, None)["statusCode"] == 204
+
+
+def test_customer_cannot_write_catalog() -> None:
+    event = _event(roles=["Cliente"], scopes="catalog.read catalog.write")
+    event["body"] = '{"nombre":"Producto","precio":1,"stock":1}'
+    event["pathParameters"] = {"id": "prod-1"}
+
+    assert catalog_handlers.crear_producto(event, None)["statusCode"] == 403
+    assert catalog_handlers.actualizar_producto(event, None)["statusCode"] == 403
+    assert catalog_handlers.eliminar_producto(event, None)["statusCode"] == 403
 
 
 def test_customer_order_list_is_scoped_to_jwt_identity(monkeypatch: pytest.MonkeyPatch) -> None:

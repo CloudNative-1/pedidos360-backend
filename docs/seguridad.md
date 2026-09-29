@@ -12,11 +12,11 @@ La Lambda no vuelve a verificar criptográficamente el JWT. Esto centraliza la v
 
 El payload del JWT que usa `RequireRole`, `useAuthorization` y TokenInspector en React se decodifica solo para experiencia de usuario/inspección; esa decodificación no verifica legitimidad. El backend y API Gateway siguen siendo obligatorios.
 
-## Issuer y audience pendientes
+## Issuer y audience
 
-Configuración de Serverless actual: issuer fallback `https://login.microsoftonline.com/4b0c585d-b153-4a09-9342-8df80ff8962b/v2.0`; audience fallback `api://7a88281a-780d-49a9-9cb7-d0bc4333f5c4`. Ambos se pueden sustituir con `JWT_ISSUER` y `JWT_AUDIENCE` al resolver Serverless.
+Configuración definitiva de Serverless: issuer `https://login.microsoftonline.com/4b0c585d-b153-4a09-9342-8df80ff8962b/v2.0`; audience `7a88281a-780d-49a9-9cb7-d0bc4333f5c4` (GUID de la App Registration Pedidos360-API, **no** `api://GUID`). Ambos pueden sustituirse con `JWT_ISSUER` y `JWT_AUDIENCE` al resolver Serverless (ver `.env.example`).
 
-El valor de `aud` de un access token v2 no se ha inspeccionado. El fallback es histórico, no una afirmación de que coincide. Antes de desplegar, iniciar sesión como usuario real y leer `aud`, `iss`, `scp` y `roles` en TokenInspector. Configurar exactamente esos valores en el entorno de Serverless; nunca cambiar entre GUID y `api://` por conjetura. No copiar ni guardar el token completo.
+La comprobación final de los claims `aud`, `iss`, `scp` y `roles` de un access token real se hace en el navegador con TokenInspector durante la demo (evidencia manual pendiente; ver `docs/evidencias/rubrica-final.md`). No copiar ni guardar el token completo.
 
 El JWT Authorizer se asigna a las nueve rutas protegidas. Sin token o con token inválido, API Gateway responde 401 antes de Lambda. Si el token es válido y tiene el scope de API Gateway pero no el rol de negocio, Lambda responde 403. Para demostrar Cliente→403 en catálogo, el token debe incluir `catalog.read`; de lo contrario el rechazo puede ocurrir antes por scope y no demuestra la regla de rol.
 
@@ -34,12 +34,12 @@ Un guard de React solo oculta vistas; un usuario puede llamar directamente la UR
 | Ruta | Roles en Lambda | Scope API Gateway |
 | --- | --- | --- |
 | `GET /catalogo`, `GET /catalogo/{id}` | `Admin`, `Operador` | `catalog.read` |
-| `POST /catalogo`, `PUT /catalogo/{id}`, `DELETE /catalogo/{id}` | `Admin`, `Operador` actualmente | `catalog.write` |
+| `POST /catalogo`, `PUT /catalogo/{id}`, `DELETE /catalogo/{id}` | `Admin` | `catalog.write` |
 | `GET /pedidos`, `GET /pedidos/{id}` | `Admin`, `Operador`, `Cliente` | `orders.read` |
 | `POST /pedidos` | `Cliente`, `Operador` | `orders.write` |
 | `PUT /pedidos/{id}/estado` | `Admin`, `Operador` | `orders.write` |
 
-Cliente ve solo los pedidos cuyo `clienteId` coincide con `oid` (o `sub` si no existe `oid`). Auditor no tiene permiso de rutas de negocio en esta etapa. La diferencia sobre escritura de catálogo está en [decision-conflicts.md](decision-conflicts.md).
+Cliente ve solo los pedidos cuyo `clienteId` coincide con `oid` (o `sub` si no existe `oid`). Un token con cualquier rol ajeno a la matriz (Admin/Operador/Cliente) recibe 403 en cada ruta. La decisión final de escritura del catálogo (solo Admin) está documentada en [decision-conflicts.md](decision-conflicts.md).
 
 ## CORS, secretos y logs
 

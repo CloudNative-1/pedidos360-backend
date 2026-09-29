@@ -1,34 +1,44 @@
 # Pedidos360 Backend
 
-Backend Python existente para catálogo y pedidos, ejecutado en AWS Lambda detrás de API Gateway HTTP API. Serverless administra la configuración; DynamoDB conserva productos y pedidos. El stack desplegado que reporta el equipo es `backend-pedidos360-dev` en `us-east-1`, con URL `https://o3k66b0owk.execute-api.us-east-1.amazonaws.com`.
+Backend Python para catálogo y pedidos de Pedidos360, ejecutado en AWS Lambda detrás de API Gateway HTTP API con JWT Authorizer de Microsoft Entra ID. Serverless (Framework v4) administra la infraestructura; DynamoDB conserva productos y pedidos.
+
+- **Stack desplegado:** `backend-pedidos360-dev` en `us-east-1` (cuenta AWS Academy `559662328432`).
+- **URL base:** `https://o3k66b0owk.execute-api.us-east-1.amazonaws.com`
 
 ## Arquitectura
 
-`React + MSAL` inicia sesión con Microsoft Entra ID y solicita un access token de `Pedidos360-API`. El navegador manda `Authorization: Bearer <access_token>` a API Gateway. Su JWT Authorizer valida firma, `iss`, `aud`, `exp` y el scope configurado por ruta antes de invocar la Lambda. El handler extrae los claims validados, aplica roles/ownership y llama al service; el service contiene reglas de negocio y el repository accede a DynamoDB.
+```
+React + MSAL (frontend)
+  → Microsoft Entra ID (login + access token JWT v2)
+  → API Gateway HTTP API (JWT Authorizer: firma, iss, aud, exp, scope)
+  → AWS Lambda Python 3.14 (roles, scope defensivo, ownership, reglas de negocio)
+  → DynamoDB (productos y pedidos; stock atómico)
+```
 
-Cada función sigue `handler → service → repository → DynamoDB`; no hay Lambda monolítica. Las tablas se llaman `backend-pedidos360-dev-productos` y `backend-pedidos360-dev-pedidos`; `id` es partition key y pedidos tiene el GSI `clienteId-index`. No se requiere tabla de usuarios: la identidad viene de Entra ID.
+Cada función sigue `handler → service → repository → DynamoDB` (sin Lambda monolítica). Las tablas se llaman `backend-pedidos360-dev-productos` y `backend-pedidos360-dev-pedidos`; `id` es partition key y pedidos usa el GSI `clienteId-index`. No hay tabla de usuarios: la identidad viene de Entra ID (`oid`, fallback `sub`).
 
-## Identidad y permisos
+## Autenticación y autorización
 
-Tenant informado: `4b0c585d-b153-4a09-9342-8df80ff8962b`. El frontend y la API son App Registrations distintas. El access token debe ser para la API, no un ID token ni un token de Microsoft Graph. MSAL Browser obtiene/cacha el token; no se guarda manualmente en archivos del backend.
+- **Issuer:** `https://login.microsoftonline.com/4b0c585d-b153-4a09-9342-8df80ff8962b/v2.0`
+- **Audience:** `7a88281a-780d-49a9-9cb7-d0bc4333f5c4` (GUID de la App Registration `Pedidos360-API`; **no** `api://...`)
+- **Scopes:** `catalog.read`, `catalog.write`, `orders.read`, `orders.write`
+- **Roles:** `Admin`, `Operador`, `Cliente`. No existe `Auditor`.
 
-Scopes exactos: `catalog.read`, `catalog.write`, `orders.read`, `orders.write`. Roles exactos: `Admin`, `Operador`, `Cliente`, `Auditor`. El código no implementa auditoría completa; `Auditor` no autoriza rutas de negocio actuales.
+API Gateway valida criptográficamente el JWT antes de invocar la Lambda. La Lambda revalida rol, scope y ownership en cada request (doble barrera). El payload JWT se decodifica en el frontend solo para UX; la seguridad la imponen API Gateway + Lambda.
 
-El issuer configurado por defecto es el issuer v2 esperado: `https://login.microsoftonline.com/4b0c585d-b153-4a09-9342-8df80ff8962b/v2.0`. El fallback actual de audience es `api://7a88281a-780d-49a9-9cb7-d0bc4333f5c4`; es el valor histórico de configuración, **no está confirmado contra el access token v2 real**. No desplegar hasta comparar `aud`, `iss`, `scp` y `roles` en TokenInspector. `JWT_ISSUER` y `JWT_AUDIENCE` son variables de resolución Serverless y pueden sobrescribir ambos valores. Ver [seguridad](docs/seguridad.md).
+## Matriz de roles y scopes
 
-Roles por operación:
+| Operación | Roles | Scope |
+| --- | --- | --- |
+| `GET /catalogo`, `GET /catalogo/{id}` | Admin, Operador | `catalog.read` |
+| `POST /catalogo`, `PUT /catalogo/{id}`, `DELETE /catalogo/{id}` | **Admin** | `catalog.write` |
+| `GET /pedidos`, `GET /pedidos/{id}` | Admin, Operador, Cliente | `orders.read` |
+| `POST /pedidos` | Cliente, Operador | `orders.write` |
+| `PUT /pedidos/{id}/estado` | Admin, Operador | `orders.write` |
 
-| Operación | Roles | Scope | Regla adicional |
-| --- | --- | --- | --- |
-| GET catálogo y producto | Admin, Operador | `catalog.read` | Cliente obtiene 403 |
-| POST/PUT/DELETE catálogo | Admin, Operador | `catalog.write` | Existe conflicto documental sobre permitir escritura a Operador; no se cambió silenciosamente |
-| GET pedidos y pedido | Admin, Operador, Cliente | `orders.read` | Cliente solo ve sus pedidos |
-| POST pedido | Cliente, Operador | `orders.write` | Cliente/identidad se deriva del JWT; precio/total de backend |
-| PUT estado pedido | Admin, Operador | `orders.write` | Cliente no cambia estados |
+En código: `_CATALOG_READ_ROLES = {"Admin", "Operador"}` y `_CATALOG_WRITE_ROLES = {"Admin"}` en `src/catalogo/handlers.py`. El Cliente solo ve pedidos cuyo `clienteId` coincide con su `oid` (fallback `sub`); no puede cambiar estados ni administrar el catálogo.
 
-La diferencia del permiso de escritura del catálogo está registrada en [conflictos de requisitos](docs/decision-conflicts.md). `Auditor` existe en Entra según el equipo, pero está fuera del alcance de endpoints actual.
-
-## Rutas
+## Endpoints (9 rutas)
 
 | Método y ruta | Lambda | Scope |
 | --- | --- | --- |
@@ -42,51 +52,72 @@ La diferencia del permiso de escritura del catálogo está registrada en [confli
 | `POST /pedidos` | `crearPedido` | `orders.write` |
 | `PUT /pedidos/{id}/estado` | `actualizarEstadoPedido` | `orders.write` |
 
-Todas las rutas anteriores tienen el JWT Authorizer. La configuración exacta está en `serverless.yml`; el contrato está en [OpenAPI](docs/openapi.yaml).
+Todas las rutas usan el JWT Authorizer `entraJwt` con los scopes indicados. El contrato OpenAPI está en [`docs/openapi.yaml`](docs/openapi.yaml).
 
-## Stock y pedidos
+## Pedidos y control de stock
 
-Crear pedido genera estado `CREADO` y no descuenta stock. La transición `CREADO → ACEPTADO` descuenta dentro de una transacción DynamoDB que condiciona `stock >= cantidad` y condiciona el estado previo del pedido. Si falla una línea, DynamoDB revierte la transacción completa y el backend devuelve 409. Cancelar desde `CREADO` no toca stock; cancelar desde `ACEPTADO` o `EN_PREPARACION` devuelve stock en la misma transacción que marca el pedido `CANCELADO`. Las transiciones están centralizadas en `src/pedidos/transitions.py`.
-
-El endpoint rechaza más de 99 productos únicos: la transacción requiere una acción por producto y otra por pedido, frente al máximo DynamoDB de 100 acciones.
+- `POST /pedidos` crea el pedido en estado `CREADO` y **no** descuenta stock. El body solo recibe `{ "productos": [{ "productoId", "cantidad" }] }`; la identidad del cliente, `clienteId`, `clienteNombre`, precios y `total` los deriva el backend del JWT y del catálogo. Rechaza campos extra (`clienteId`, `total`, etc.) con 400.
+- `CREADO → ACEPTADO` descuenta stock dentro de una transacción DynamoDB que condiciona `stock >= cantidad` y el estado previo; si no hay stock suficiente responde **409 Conflict** y revierte todo.
+- `CANCELADO` desde `CREADO` no toca stock; desde `ACEPTADO` o `EN_PREPARACION` devuelve stock una sola vez en la misma transacción. Nunca se permite stock negativo.
+- Flujo normal: `CREADO → ACEPTADO → EN_PREPARACION → DESPACHADO → ENTREGADO`. Las transiciones válidas están centralizadas en `src/pedidos/transitions.py`.
+- Límite de 99 productos únicos por pedido (máximo de acciones por transacción DynamoDB).
 
 ## Códigos HTTP
 
-`200` consulta/actualización, `201` creación, `204` borrado; `400` validación, `401` falta principal, `403` rol/scope/ownership, `404` elemento ausente, `409` transición/stock/conflicto y `500` error no controlado. En la API live observada, API Gateway devuelve 401 con body vacío antes de invocar Lambda. Los errores generados por Lambda tienen `{ "error": "...", "message": "..." }`; el 500 no devuelve stack trace en el body. El logger registra operación/request ID, no el evento ni el bearer token.
+`200` consulta/actualización, `201` creación, `204` borrado; `400` validación, `401` sin token o token rechazado (API Gateway responde con body vacío antes de Lambda), `403` rol/scope/ownership insuficiente, `404` recurso ausente, `409` transición/stock/conflicto, `500` error controlado genérico (sin stack trace en el body). Los errores de Lambda usan `{ "error": "...", "message": "..." }`.
+
+## Seed de productos de demostración
+
+Los productos con los que el Cliente hace pedidos en la demo deben existir en DynamoDB. El script idempotente `scripts/seed_products.py` inserta los 6 productos demo con IDs estables (`prod-teclado-001` … `prod-soporte-006`) y **no sobrescribe** existentes salvo `--force` explícito:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/seed_products.py --dry-run
+.\.venv\Scripts\python.exe scripts/seed_products.py
+```
+
+El frontend (vista Cliente / "Comprar") usa una fuente de demostración con estos mismos IDs; los pedidos creados desde la UI apuntan a productos reales en DynamoDB.
 
 ## Desarrollo local
 
-Requisitos comprobados en este entorno: Python 3.14 y AWS Lambda `python3.14` aparece como runtime soportado; Node/npm para el frontend separado. No se requiere AWS para las pruebas de backend: Moto simula DynamoDB.
+Requisitos: Python 3.14, AWS CLI v2 configurado, Serverless Framework 4 y Node/npm (frontend).
 
 ```powershell
-cd backend-pedidos360
 python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m compileall src
-.\.venv\Scripts\pytest.exe
-serverless.cmd print --stage dev
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-`requirements.txt` no declara librerías runtime propias; el código usa `boto3` del runtime Lambda. `requirements-dev.txt` aporta `pytest` y `moto[dynamodb]`. El paquete se limita a `src/` y excluye bytecode/cache, tests y docs.
+Las pruebas usan Moto (DynamoDB simulado) y no requieren AWS real. `serverless print --stage dev` valida el template sin desplegar.
 
-## AWS Academy y Serverless
+## AWS Academy / VocLabs y despliegue
 
-Renueva las credenciales temporales en el perfil local `pedidos360`; no las guardes en el repositorio ni las pegues en chats. Configúralas localmente con `aws configure --profile pedidos360` y agrega el session token vigente con `aws configure set aws_session_token <valor-local> --profile pedidos360`. Verifica primero `aws sts get-caller-identity --profile pedidos360`.
+1. Renueva las credenciales temporales en el perfil local `pedidos360` (nunca las subas al repositorio):
+   ```powershell
+   aws configure set aws_access_key_id "<nueva>" --profile pedidos360
+   aws configure set aws_secret_access_key "<nueva>" --profile pedidos360
+   aws configure set aws_session_token "<vigente>" --profile pedidos360
+   aws sts get-caller-identity --profile pedidos360
+   ```
+2. Con las credenciales vigentes:
+   ```powershell
+   serverless.cmd login
+   serverless.cmd print --stage dev
+   serverless.cmd deploy --stage dev --aws-profile pedidos360
+   ```
 
-Después de confirmar `JWT_ISSUER`/`JWT_AUDIENCE` contra el token real y revisar el diff de infraestructura:
-
-```powershell
-serverless.cmd print --stage dev
-serverless.cmd package --stage dev --aws-profile pedidos360
-serverless.cmd deploy --stage dev --aws-profile pedidos360
-```
-
-El último comando **no se ha ejecutado**. No uses `serverless remove`. `provider.iam.role` referencia el rol externo `arn:aws:iam::559662328432:role/LabRole`; no se declara su policy en este proyecto, por lo que el mínimo privilegio efectivo no se puede comprobar aquí y depende de AWS Academy. Actualizar credenciales expiradas no requiere cambiar código.
+`provider.iam.role` referencia el rol externo `arn:aws:iam::559662328432:role/LabRole` de AWS Academy. Cambiar credenciales expiradas no requiere modificar código. **No usar `serverless remove`.**
 
 ## Pruebas y conexión
 
-`pytest` valida autorización, CRUD en DynamoDB simulado, estados, stock atómico, errores y ownership; no valida una cuenta Entra o recursos AWS reales. El script [test-api.ps1](scripts/test-api.ps1) permite hacer smoke, preflight y CRUD con tokens proporcionados localmente mediante `PEDIDOS360_TOKEN_ADMIN`/`PEDIDOS360_TOKEN_CLIENTE`; nunca imprime ni almacena tokens. Si PowerShell bloquea scripts por la política local, habilítalos solo para esa sesión con `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` y luego ejecuta `scripts/test-api.ps1`.
+`pytest` valida autorización (matriz de roles y scopes), CRUD en DynamoDB simulado, transiciones de pedido, stock atómico, ownership del Cliente y códigos de error. El script [`scripts/test-api.ps1`](scripts/test-api.ps1) permite smoke, preflight, 401 sin token y CRUD/ordenes contra la API live con tokens provistos por variables de entorno; nunca imprime ni almacena tokens.
 
-Para el frontend separado, configura su `.env` local con `VITE_API_BASE_URL=https://o3k66b0owk.execute-api.us-east-1.amazonaws.com` y los scopes de `Pedidos360-API`. En el entorno inspeccionado el `.env` tenía los cuatro scopes y Client/Tenant IDs configurados, pero `VITE_API_BASE_URL` estaba vacío. No se modificó el frontend porque la ruta con JWT real y la audience todavía no se han verificado. Ejecuta `npm.cmd run build` desde `frontend_pedido360` en PowerShell.
+El frontend conecta con `VITE_API_BASE_URL=https://o3k66b0owk.execute-api.us-east-1.amazonaws.com` desde `http://localhost:5173` (CORS restringido a este origen en dev).
 
-El material original menciona Angular/Spring Boot y el ejemplo HTML también contiene una referencia antigua a Lambda Node.js. El material adaptado permite React + Lambda; la implementación actual es React/TypeScript/Vite/MSAL + Python Lambda, API Gateway HTTP API y DynamoDB. No hay RabbitMQ/Kafka/Zookeeper, reportes ni auditoría completa en esta fase. Ver [PKCE](docs/pkce.md), [guía de demo](docs/demo-presentacion.md) y [checklist de rúbrica](docs/rubrica-checklist.md).
+## Documentación del proyecto
+
+- [`docs/openapi.yaml`](docs/openapi.yaml) — contrato de las 9 rutas.
+- [`docs/seguridad.md`](docs/seguridad.md) — seguridad y autorización.
+- [`docs/pkce.md`](docs/pkce.md) — Authorization Code + PKCE (gestionado por MSAL).
+- [`docs/demo-presentacion.md`](docs/demo-presentacion.md) — guion de demo.
+- [`docs/rubrica-checklist.md`](docs/rubrica-checklist.md) — checklist de rúbrica.
+- [`docs/evidencias/rubrica-final.md`](docs/evidencias/rubrica-final.md) — evidencia final de cierre.

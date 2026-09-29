@@ -1,23 +1,25 @@
-# Conflictos y diferencias de alcance
+# Decisiones y alcance
 
-## Escritura de catálogo: Admin u Operador
+## Escritura de catálogo: solo Admin (RESUELTO)
 
-**Caso/requisito entregado:** la preferencia indicada es que `POST`, `PUT` y `DELETE` de catálogo sean solo para `Admin`; además, se exige no cambiar una autorización existente sin reportar el conflicto.
+**Antecedente:** la preferencia del caso era que `POST`, `PUT` y `DELETE` de catálogo fueran solo para `Admin`; el código quedó en `{"Admin", "Operador"}` y existía un conflicto documental.
 
-**Material del profesor:** demuestra `Operador + GET /catalogo → 200` y `Cliente + GET /catalogo → 403`. En la guía, la frase “solo Admin puede editar el catálogo” aparece como ejemplo de política por rol, no como una tabla normativa inequívoca para este proyecto.
+**Decisión final:** `_CATALOG_WRITE_ROLES = {"Admin"}` en `src/catalogo/handlers.py`. `_CATALOG_READ_ROLES = {"Admin", "Operador"}`.
 
-**Código actual:** permite `Admin` y `Operador` en `catalog.write`; API Gateway además exige el scope `catalog.write`.
+- Admin: CRUD completo del catálogo.
+- Operador: solo lectura (`GET /catalogo` y `GET /catalogo/{id}`); `POST/PUT/DELETE` → **403**.
+- Cliente: sin acceso al catálogo administrativo → **403** (y sin ruta en la UI).
 
-**Recomendación:** acordar con el profesor/product owner una única matriz. Si “máxima coherencia” exige que solo Admin modifique catálogo, cambiar `_CATALOG_WRITE_ROLES` a `{"Admin"}` y mantener Operador con lectura; no se hizo ese cambio unilateralmente.
+Se actualizaron los tests (`tests/test_authorization.py`) y el contrato (`docs/openapi.yaml`), la matriz en `docs/seguridad.md` y el README para reflejar la matriz final.
 
 ## Stack original
 
-Los documentos originales citan Angular, Spring Boot/BFF y EC2. El material adaptado del profesor permite React + MSAL y AWS API Gateway + Lambda; el proyecto existente usa React/TypeScript/Vite, Python Lambda, API Gateway HTTP API, JWT Authorizer y DynamoDB. Esta adaptación no se convirtió a Java, Angular ni EC2. El HTML de la guía contiene un ejemplo antiguo que describe una Lambda Node.js; el código de esta entrega es Python.
+Los documentos originales citan Angular, Spring Boot/BFF y EC2. El material adaptado del profesor permite React + MSAL y AWS API Gateway + Lambda; el proyecto usa React/TypeScript/Vite, Python Lambda 3.14, API Gateway HTTP API, JWT Authorizer y DynamoDB. No se convirtió a Java, Angular ni EC2.
 
 ## JWT en API Gateway frente a BFF
 
-La validación criptográfica, issuer, audience y vigencia se realiza en API Gateway antes de Lambda. Python recibe claims del contexto del authorizer y aplica autorización/reglas. Si la rúbrica exige que el proceso BFF/Python valide por sí mismo además del Gateway, eso no está implementado; agregar un verificador local no es necesario para la arquitectura/profesor documentados y requiere acordar interpretación.
+La validación criptográfica, issuer, audience y vigencia se realiza en API Gateway antes de Lambda. Python recibe claims del contexto del authorizer y aplica autorización/reglas (doble barrera). No se implementa criptografía JWT manual en Lambda.
 
-## Auditoría
+## Roles del modelo final
 
-`Auditor` existe como App Role según el equipo, pero la fase de auditoría completa no forma parte del alcance actual. No hay eventos de auditoría, Kafka, reportes ni un endpoint privilegiado para Auditor; el rol no está autorizado en las rutas presentes.
+El modelo definitivo tiene tres roles: `Admin`, `Operador` y `Cliente`. **No existe `Auditor`** en la matriz de esta entrega; un token con cualquier otro rol es rechazado con 403 en todas las rutas (cubierto por tests).

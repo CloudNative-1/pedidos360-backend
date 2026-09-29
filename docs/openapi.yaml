@@ -5,7 +5,7 @@ info:
   description: API HTTP protegida por API Gateway JWT Authorizer y scopes OAuth de Microsoft Entra ID.
 servers:
   - url: https://o3k66b0owk.execute-api.us-east-1.amazonaws.com
-    description: URL reportada por el equipo; el estado live no se verificó en esta revisión.
+    description: URL del stack desplegado backend-pedidos360-dev (us-east-1).
 security:
   - bearerJWT: []
 paths:
@@ -29,7 +29,7 @@ paths:
         '500': {$ref: '#/components/responses/InternalError'}
     post:
       operationId: crearProducto
-      x-allowed-roles: [Admin, Operador]
+      x-allowed-roles: [Admin]
       x-required-scope: catalog.write
       requestBody:
         required: true
@@ -67,7 +67,7 @@ paths:
         '500': {$ref: '#/components/responses/InternalError'}
     put:
       operationId: actualizarProducto
-      x-allowed-roles: [Admin, Operador]
+      x-allowed-roles: [Admin]
       x-required-scope: catalog.write
       requestBody:
         required: true
@@ -87,7 +87,7 @@ paths:
         '500': {$ref: '#/components/responses/InternalError'}
     delete:
       operationId: eliminarProducto
-      x-allowed-roles: [Admin, Operador]
+      x-allowed-roles: [Admin]
       x-required-scope: catalog.write
       responses:
         '204': {description: Producto eliminado sin cuerpo.}

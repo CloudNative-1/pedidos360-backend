@@ -1,20 +1,29 @@
 # Checklist de rúbrica
 
-Los estados califican evidencia disponible en esta revisión, no configuración del portal o pruebas live no observadas.
+Estado al cierre de la entrega (`final/rubrica-pedidos360`). Los ítems marcados como evidencia manual requieren comprobación en navegador/Entra/AWS durante la presentación (ver [evidencias/rubrica-final.md](evidencias/rubrica-final.md)).
 
-| Criterio | Ponderación | Estado | Evidencia | Archivo/configuración | Prueba | Pendiente |
-| --- | ---: | --- | --- | --- | --- | --- |
-| Rutas de API Gateway y Lambdas | 13% | ⚠️ requiere evidencia/manual | Nueve rutas live con JWT y los scopes esperados; nombres Lambda coinciden con el template | `serverless.yml`, handlers, stack CloudFormation | `get-routes` y nueve Lambdas consultadas; falta ejercicio autenticado de cada ruta | Captura visual API Gateway y resultados CRUD |
-| CORS seguro | 7% | ✅ comprobado | Origen `http://localhost:5173`, métodos/headers limitados, sin wildcard | `serverless.yml` | OPTIONS live respondió 204 con origin, methods y headers esperados | Captura navegador para completar evidencia de presentación |
-| Tenant, usuarios, roles y políticas | 10% | ⚠️ requiere evidencia/manual | IDs/roles descritos en requisitos y código de autorización | `src/auth/claims.py`, handlers | Tests de roles; no se consultó Entra | Evidencia del tenant, asignaciones y políticas |
-| App Registrations, client ID, redirect URI, roles y scopes | 10% | ⚠️ requiere evidencia/manual | Frontend MSAL y `.env.example` contienen el contrato de configuración | `frontend_pedido360/src/auth/authConfig.ts`, `.env.example` | Build frontend pasó; no se inspeccionó portal Entra | Capturas de SPA redirect, API scopes/App Roles y consent |
-| Login y obtención de token | 10% | ⚠️ requiere evidencia/manual | MSAL inicializa antes de React y adquiere access token de API | `frontend_pedido360/src/main.tsx`, `src/api/client.ts` | Build pasó; no se ejecutó login | Video/captura con usuario de demo y TokenInspector |
-| Authorization Code + PKCE, state y nonce | 15% | ⚠️ requiere evidencia/manual | MSAL Browser gestiona el protocolo; sin PKCE manual | `frontend_pedido360/src/main.tsx`, [pkce.md](pkce.md) | Revisado estáticamente; no hay captura Network | Captura de `code_challenge_method=S256`, `state` y `nonce` sin secretos |
-| JWT en todas las rutas, issuer, audience, 200/401/403 | 20% | ⚠️ requiere evidencia/manual | Authorizer JWT y scope en cada route live; issuer v2 esperado; audience live continúa en `api://...` sin comparación con token real | `serverless.yml`, `src/auth/authorization.py` | 401 sin token comprobado live; no hay evidencia real de 200/403 ni `aud` | Claims `aud/iss/scp/roles` de TokenInspector y pruebas autenticadas live |
-| Evidencia de nueve rutas y JSON esperado | 15% | ⚠️ requiere evidencia/manual | Contrato OpenAPI y script PowerShell reproducible | [openapi.yaml](openapi.yaml), `scripts/test-api.ps1` | ZIP contiene `src/` y excluye contenido prohibido; no se ejecutó CRUD live | Ejecutar CRUD, guardar status/body saneados y capturas |
+| Criterio | Estado | Evidencia actual | Evidencia manual pendiente |
+| --- | --- | --- | --- |
+| 9 rutas + 9 Lambdas con JWT Authorizer y scopes | ✅ configuración verificada | `serverless.yml` desplegado como `backend-pedidos360-dev`; 9 rutas, 9 Lambdas Python 3.14 | Ejercer cada ruta autenticada live |
+| CORS seguro | ✅ comprobado | Origen `http://localhost:5173`, métodos/headers limitados, sin wildcard | Captura navegador |
+| Tenant, roles y políticas | ✅ matriz implementada | Rol Claims en Lambda: Admin/Operador/Cliente sin Auditor; tests 403 para roles ajenos | Evidencia de asignaciones en portal Entra |
+| App Registrations, redirect URI, scopes | ✅ configurado | `authConfig.ts` + `.env.example` | Capturas del portal Entra |
+| Login y obtención de token | ✅ implementado | MSAL inicializa antes de React; access token vía `acquireTokenSilent` | Video/captura de login real |
+| Authorization Code + PKCE, state, nonce | ✅ implementado (MSAL) | `src/main.tsx`, docs/pkce.md | Captura Network con `response_type=code`, `code_challenge_method=S256`, `state`, `nonce` |
+| JWT, issuer, audience, 200/401/403 | ✅ configuración + 401 live | Issuer v2 + audience GUID en `serverless.yml`; 401 sin token comprobado live | 200/403 autenticados live y claims `aud/iss/scp/roles` en TokenInspector |
+| Evidencia de 9 rutas y JSON esperado | ✅ contrato | OpenAPI actualizado; `scripts/test-api.ps1` reproducible | CRUD live con status/body saneados |
+| Tests | ✅ **64 passed** | `pytest -q` en venv local (Moto) | — |
+| Build frontend | ✅ aprobado | `npm run build` (aviso de bundle >500 kB no bloqueante) | — |
+| Lint frontend | ✅ aprobado | `npm run lint` (oxlint) | — |
 
-## Evidencia local disponible
+## Verificado en esta revisión
 
-`python -m compileall src`, `pytest` (62 passed), `serverless print --stage dev` y `serverless package --stage dev --aws-profile pedidos360` pasaron. El ZIP contiene solo archivos `src/`; excluye tests, docs, venv, bytecode y `.env`. El build TypeScript/Vite pasó con aviso de bundle principal superior a 500 kB. AWS confirmó stack `CREATE_COMPLETE`, 9 routes, 9 Lambdas Python 3.14, tablas ACTIVE, 401 sin token y OPTIONS 204.
+- `python -m compileall src` y `pytest -q` → **64 passed** (matriz de roles/scopes, CRUD, transiciones, stock atómico, ownership Cliente, 401/403/409).
+- `serverless print --stage dev` resuelve el template; stack `backend-pedidos360-dev` desplegado en `us-east-1` con URL `https://o3k66b0owk.execute-api.us-east-1.amazonaws.com`.
+- 401 sin token y OPTIONS 204 (CORS) comprobados contra la API live.
+- `_CATALOG_WRITE_ROLES = {"Admin"}`; roles finales Admin/Operador/Cliente (sin Auditor).
 
-IAM: `LabRole` tiene 7 policies administradas y 0 inline. AWS Academy denegó `iam:GetPolicy` sobre policies VocLab, así que el contenido/permisos efectivos y el mínimo privilegio no se pudieron auditar; no se modificó el rol.
+## No auditable desde este entorno
+
+- Las policies del `LabRole` de AWS Academy (`iam:GetPolicy` denegado); no se modificó el rol.
+- La cuenta Entra ID real y los claims de un access token emitido (evidencia manual).
