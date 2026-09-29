@@ -1,0 +1,242 @@
+org: lafontecilla
+service: backend-pedidos360
+
+frameworkVersion: '4'
+
+provider:
+  name: aws
+  runtime: python3.14
+  architecture: arm64
+  region: ${env:AWS_REGION, 'us-east-1'}
+  stage: ${opt:stage, env:STAGE, 'dev'}
+
+  memorySize: 256
+  timeout: 10
+
+  # AWS Academy / VocLabs
+  # Usamos el LabRole que ya comprobamos que existe.
+  iam:
+    role: arn:aws:iam::559662328432:role/LabRole
+
+  logs:
+    httpApi:
+      format: '{"requestId":"$context.requestId","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","routeKey":"$context.routeKey","status":"$context.status","responseLength":"$context.responseLength","sourceIp":"$context.identity.sourceIp"}'
+
+  environment:
+    STAGE: ${sls:stage}
+    PRODUCTS_TABLE: ${self:service}-${sls:stage}-productos
+    ORDERS_TABLE: ${self:service}-${sls:stage}-pedidos
+    ORDERS_CUSTOMER_INDEX: clienteId-index
+
+  httpApi:
+
+    # CORS para el frontend Vite local.
+    # Cuando despleguemos el frontend agregaremos también su URL real.
+    cors:
+      allowedOrigins:
+        - ${env:CORS_ORIGIN, 'http://localhost:5173'}
+      allowedHeaders:
+        - Authorization
+        - Content-Type
+        - Accept
+      allowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      allowCredentials: false
+
+    # JWT Authorizer de Microsoft Entra ID
+    authorizers:
+      entraJwt:
+        identitySource: $request.header.Authorization
+        issuerUrl: ${env:JWT_ISSUER, 'https://login.microsoftonline.com/4b0c585d-b153-4a09-9342-8df80ff8962b/v2.0'}
+        audience:
+          - ${env:JWT_AUDIENCE, '7a88281a-780d-49a9-9cb7-d0bc4333f5c4'}
+
+
+package:
+  patterns:
+    - '!**'
+    - 'src/**'
+    - '!src/**/__pycache__/**'
+    - '!src/**/*.py[cod]'
+
+
+functions:
+
+  # ============================================================
+  # CATÁLOGO
+  # ============================================================
+
+  listarCatalogo:
+    handler: src.catalogo.handlers.listar_catalogo
+    events:
+      - httpApi:
+          path: /catalogo
+          method: GET
+          authorizer:
+            name: entraJwt
+            scopes:
+              - catalog.read
+
+  obtenerProducto:
+    handler: src.catalogo.handlers.obtener_producto
+    events:
+      - httpApi:
+          path: /catalogo/{id}
+          method: GET
+          authorizer:
+            name: entraJwt
+            scopes:
+              - catalog.read
+
+  crearProducto:
+    handler: src.catalogo.handlers.crear_producto
+    events:
+      - httpApi:
+          path: /catalogo
+          method: POST
+          authorizer:
+            name: entraJwt
+            scopes:
+              - catalog.write
+
+  actualizarProducto:
+    handler: src.catalogo.handlers.actualizar_producto
+    events:
+      - httpApi:
+          path: /catalogo/{id}
+          method: PUT
+          authorizer:
+            name: entraJwt
+            scopes:
+              - catalog.write
+
+  eliminarProducto:
+    handler: src.catalogo.handlers.eliminar_producto
+    events:
+      - httpApi:
+          path: /catalogo/{id}
+          method: DELETE
+          authorizer:
+            name: entraJwt
+            scopes:
+              - catalog.write
+
+
+  # ============================================================
+  # PEDIDOS
+  # ============================================================
+
+  listarPedidos:
+    handler: src.pedidos.handlers.listar_pedidos
+    events:
+      - httpApi:
+          path: /pedidos
+          method: GET
+          authorizer:
+            name: entraJwt
+            scopes:
+              - orders.read
+
+  obtenerPedido:
+    handler: src.pedidos.handlers.obtener_pedido
+    events:
+      - httpApi:
+          path: /pedidos/{id}
+          method: GET
+          authorizer:
+            name: entraJwt
+            scopes:
+              - orders.read
+
+  crearPedido:
+    handler: src.pedidos.handlers.crear_pedido
+    events:
+      - httpApi:
+          path: /pedidos
+          method: POST
+          authorizer:
+            name: entraJwt
+            scopes:
+              - orders.write
+
+  actualizarEstadoPedido:
+    handler: src.pedidos.handlers.actualizar_estado_pedido
+    events:
+      - httpApi:
+          path: /pedidos/{id}/estado
+          method: PUT
+          authorizer:
+            name: entraJwt
+            scopes:
+              - orders.write
+
+
+resources:
+  Resources:
+
+    # ============================================================
+    # TABLA PRODUCTOS
+    # ============================================================
+
+    ProductosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${sls:stage}-productos
+        BillingMode: PAY_PER_REQUEST
+
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+
+
+    # ============================================================
+    # TABLA PEDIDOS
+    # ============================================================
+
+    PedidosTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:service}-${sls:stage}-pedidos
+        BillingMode: PAY_PER_REQUEST
+
+        AttributeDefinitions:
+          - AttributeName: id
+            AttributeType: S
+
+          - AttributeName: clienteId
+            AttributeType: S
+
+        KeySchema:
+          - AttributeName: id
+            KeyType: HASH
+
+        GlobalSecondaryIndexes:
+          - IndexName: clienteId-index
+
+            KeySchema:
+              - AttributeName: clienteId
+                KeyType: HASH
+
+            Projection:
+              ProjectionType: ALL
+
+
+  Outputs:
+
+    ProductosTableName:
+      Description: Nombre de la tabla DynamoDB de productos
+      Value:
+        Ref: ProductosTable
+
+    PedidosTableName:
+      Description: Nombre de la tabla DynamoDB de pedidos
+      Value:
+        Ref: PedidosTable

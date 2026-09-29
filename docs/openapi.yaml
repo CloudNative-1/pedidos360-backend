@@ -1,0 +1,300 @@
+openapi: 3.0.3
+info:
+  title: Pedidos360 API
+  version: 1.0.0
+  description: API HTTP protegida por API Gateway JWT Authorizer y scopes OAuth de Microsoft Entra ID.
+servers:
+  - url: https://o3k66b0owk.execute-api.us-east-1.amazonaws.com
+    description: URL reportada por el equipo; el estado live no se verificó en esta revisión.
+security:
+  - bearerJWT: []
+paths:
+  /catalogo:
+    get:
+      operationId: listarCatalogo
+      x-allowed-roles: [Admin, Operador]
+      x-required-scope: catalog.read
+      responses:
+        '200':
+          description: Catálogo consultado.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Producto'
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    post:
+      operationId: crearProducto
+      x-allowed-roles: [Admin, Operador]
+      x-required-scope: catalog.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProductoCreate'}
+      responses:
+        '201':
+          description: Producto creado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Producto'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /catalogo/{id}:
+    parameters:
+      - {$ref: '#/components/parameters/Id'}
+    get:
+      operationId: obtenerProducto
+      x-allowed-roles: [Admin, Operador]
+      x-required-scope: catalog.read
+      responses:
+        '200':
+          description: Producto consultado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Producto'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    put:
+      operationId: actualizarProducto
+      x-allowed-roles: [Admin, Operador]
+      x-required-scope: catalog.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/ProductoUpdate'}
+      responses:
+        '200':
+          description: Producto actualizado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Producto'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    delete:
+      operationId: eliminarProducto
+      x-allowed-roles: [Admin, Operador]
+      x-required-scope: catalog.write
+      responses:
+        '204': {description: Producto eliminado sin cuerpo.}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /pedidos:
+    get:
+      operationId: listarPedidos
+      x-allowed-roles: [Admin, Operador, Cliente]
+      x-required-scope: orders.read
+      description: Cliente recibe solo pedidos asociados a oid (fallback sub).
+      responses:
+        '200':
+          description: Pedidos visibles para la identidad.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Pedido'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '500': {$ref: '#/components/responses/InternalError'}
+    post:
+      operationId: crearPedido
+      x-allowed-roles: [Cliente, Operador]
+      x-required-scope: orders.write
+      description: Cliente/nombre se derivan del JWT; precio/total del backend y catálogo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PedidoCreate'}
+      responses:
+        '201':
+          description: Pedido creado en estado CREADO; aún no descuenta stock.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pedido'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /pedidos/{id}:
+    parameters:
+      - {$ref: '#/components/parameters/Id'}
+    get:
+      operationId: obtenerPedido
+      x-allowed-roles: [Admin, Operador, Cliente]
+      x-required-scope: orders.read
+      description: Cliente solo puede consultar su propio pedido.
+      responses:
+        '200':
+          description: Pedido consultado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pedido'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '500': {$ref: '#/components/responses/InternalError'}
+  /pedidos/{id}/estado:
+    parameters:
+      - {$ref: '#/components/parameters/Id'}
+    put:
+      operationId: actualizarEstadoPedido
+      x-allowed-roles: [Admin, Operador]
+      x-required-scope: orders.write
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/PedidoEstadoUpdate'}
+      responses:
+        '200':
+          description: Estado actualizado.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pedido'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '404': {$ref: '#/components/responses/NotFound'}
+        '409': {$ref: '#/components/responses/Conflict'}
+        '500': {$ref: '#/components/responses/InternalError'}
+components:
+  securitySchemes:
+    bearerJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: {type: string, minLength: 1}
+  schemas:
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error: {type: string}
+        message: {type: string}
+    Producto:
+      type: object
+      required: [id, nombre, descripcion, precio, stock]
+      properties:
+        id: {type: string, format: uuid}
+        nombre: {type: string, minLength: 1}
+        descripcion: {type: string}
+        precio: {type: number, minimum: 0}
+        stock: {type: integer, minimum: 0}
+    ProductoCreate:
+      type: object
+      additionalProperties: false
+      required: [nombre, precio, stock]
+      properties:
+        nombre: {type: string, minLength: 1}
+        descripcion: {type: string}
+        precio: {type: number, minimum: 0}
+        stock: {type: integer, minimum: 0}
+    ProductoUpdate:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      properties:
+        nombre: {type: string, minLength: 1}
+        descripcion: {type: string}
+        precio: {type: number, minimum: 0}
+        stock: {type: integer, minimum: 0}
+    PedidoProducto:
+      type: object
+      required: [productoId, nombre, cantidad, precio]
+      properties:
+        productoId: {type: string}
+        nombre: {type: string}
+        cantidad: {type: integer, minimum: 1}
+        precio: {type: number, minimum: 0}
+    Pedido:
+      type: object
+      required: [id, clienteId, clienteNombre, estado, fechaCreacion, fechaActualizacion, total, productos]
+      properties:
+        id: {type: string, format: uuid}
+        clienteId: {type: string}
+        clienteNombre: {type: string}
+        estado:
+          type: string
+          enum: [CREADO, ACEPTADO, EN_PREPARACION, DESPACHADO, ENTREGADO, CANCELADO]
+        fechaCreacion: {type: string, format: date-time}
+        fechaActualizacion: {type: string, format: date-time}
+        total: {type: number, minimum: 0}
+        productos:
+          type: array
+          items: {$ref: '#/components/schemas/PedidoProducto'}
+    PedidoCreate:
+      type: object
+      additionalProperties: false
+      required: [productos]
+      properties:
+        productos:
+          type: array
+          minItems: 1
+          description: Puede incluir líneas repetidas; el backend limita a 99 productos distintos por transacción.
+          items:
+            type: object
+            additionalProperties: false
+            required: [productoId, cantidad]
+            properties:
+              productoId: {type: string, minLength: 1}
+              cantidad: {type: integer, minimum: 1}
+    PedidoEstadoUpdate:
+      type: object
+      additionalProperties: false
+      required: [estado]
+      properties:
+        estado:
+          type: string
+          enum: [CREADO, ACEPTADO, EN_PREPARACION, DESPACHADO, ENTREGADO, CANCELADO]
+  responses:
+    BadRequest:
+      description: Datos inválidos.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Unauthorized:
+      description: Token ausente o rechazado por API Gateway antes de Lambda. En la API inspeccionada el 401 no incluye body; los errores generados por Lambda sí usan el schema Error.
+    Forbidden:
+      description: Rol, scope o ownership insuficiente.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    NotFound:
+      description: Recurso inexistente.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    Conflict:
+      description: Stock insuficiente, estado inválido o conflicto transaccional.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
+    InternalError:
+      description: Error interno genérico sin stack trace.
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/Error'}
